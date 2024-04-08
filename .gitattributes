@@ -4,6 +4,8 @@
 * text=auto
 Packages/** linguist-detectable=false
 ProjectSettings/** linguist-detectable=false
+Assets/Settings/** linguist-detectable=false
+Assets/TutorialInfo/** linguist-detectable=false
 
 ###############################################################################
 # Set default behavior for command prompt diff.
