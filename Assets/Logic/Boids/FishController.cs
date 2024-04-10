@@ -37,24 +37,25 @@ public class FishController : MonoBehaviour
 
     public NativeArray<float3> fishPositions;
     public NativeArray<float3> fishVelocities;
+    public NativeArray<float3> fishRandoms;
     public TransformAccessArray fishTransforms;
 
-    //public NativeArray<Octree> octree;
-    //public NativeArray<SpatialHash> hash;
 
     public NativeParallelMultiHashMap<int3, int> hash;
 
     public Vector3Int dimentions = new Vector3Int(10, 10, 10);
     public int bucketSize = 5;
 
+    private JobHandle handle;
+
+    private bool isEven = true;
+
 
     void Start()
     {
-        //octree = new(1, Allocator.Persistent);
-        //octree[0] = oct;
-        //fishPositions = new(initialFishSpawn, Allocator.Persistent);
         fishPositions = new(initialFishSpawn, Allocator.Persistent);
-        fishVelocities = new NativeArray<float3>(initialFishSpawn, Allocator.Persistent);
+        fishVelocities = new(initialFishSpawn, Allocator.Persistent);
+        fishRandoms = new(initialFishSpawn, Allocator.Persistent);
         fishTransforms = new TransformAccessArray(initialFishSpawn);
 
         hash = new NativeParallelMultiHashMap<int3, int>(initialFishSpawn, Allocator.Persistent);
@@ -62,20 +63,12 @@ public class FishController : MonoBehaviour
         {
             Vector3 pos = Random.insideUnitSphere * spawnRadius;
             GameObject obj = Instantiate(fishPrefab, pos, Random.rotation);
-            //fishPositions[i] = (float3)pos;
             fishPositions[i] = (float3)pos;
             fishVelocities[i] = (float3)obj.transform.forward;
             fishTransforms.Add(obj.transform);
 
             fishes.Add(obj);
         }
-
-        //job = new FishJob(speed, turningSpeed, flockDistance, stearingWeight, flockingWeight, centerWeight, fishVelocities, fishPositions, hash);
-
-        /*job.deltaTime = Time.deltaTime;
-        JobHandle handle = job.Schedule(fishTransforms);
-
-        handle.Complete();*/
     }
 
 
@@ -83,26 +76,32 @@ public class FishController : MonoBehaviour
     {
         hash.Clear();
         SetSpatialHash spacesUpdater = new SetSpatialHash(fishPositions, fishVelocities, hash.AsParallelWriter(), bucketSize);
-
-        JobHandle handle = spacesUpdater.Schedule(fishTransforms);
+        
+        JobHandle spaces = spacesUpdater.Schedule(fishTransforms);
 
         FishJob job = new FishJob(speed, turningSpeed, flockDistance, stearingWeight, flockingWeight, centerWeight, movementRandomness, 
-            fishVelocities, fishPositions, hash.AsReadOnly(), Time.deltaTime, bucketSize, (uint)Random.Range(0, 50000));
+            fishVelocities, fishPositions, hash.AsReadOnly(), fishRandoms, Time.deltaTime, bucketSize, (uint)Random.Range(0, 50000) , isEven);
 
-        JobHandle handle1 = job.Schedule(fishTransforms, handle);
+        handle = job.Schedule(fishTransforms, spaces);
 
-        handle1.Complete();
+        isEven = !isEven;
+    }
+    private void LateUpdate()
+    {
+        handle.Complete();
     }
 
     private void OnDestroy()
     {
+        handle.Complete();
         hash.Dispose();
         fishPositions.Dispose();
         fishVelocities.Dispose();
+        fishRandoms.Dispose();
         fishTransforms.Dispose();
     }
 
-    private void OnDrawGizmosSelected()
+    /*private void OnDrawGizmosSelected()
     {
         if (!hash.IsCreated)
             return;
@@ -126,7 +125,7 @@ public class FishController : MonoBehaviour
         }
 
         arr.Dispose();
-    }
+    }*/
 
     public static int3 GetKey(float3 pos, int bucketSize)
     {
@@ -162,150 +161,6 @@ public class FishController : MonoBehaviour
             _fishesVelocity[idx] = math.forward(transform.rotation);
             int3 key = GetKey(transform.position, _bucketSize);
             _fishesSpace.Add(key, idx);
-        }
-    }
-
-
-    public struct Octree
-    {
-        public float3 start;
-        public float size;
-        
-        public UnsafeList<Octree> children;
-        private UnsafeList<float3> velocities;
-        private UnsafeList<float3> positions;
-        public bool last;
-
-        public float3 end;
-
-        public float3 test;
-
-
-        public Octree(float3 _start, float _size, int level)
-        {
-            test = new();
-            start = _start;
-            size = _size;
-            end = start + size;
-
-            children = new UnsafeList<Octree>(0, Allocator.Temp);
-            //children = new List<Octree>();
-            positions = new UnsafeList<float3>(0, Allocator.Temp);
-            velocities = new UnsafeList<float3>(0, Allocator.Temp);
-
-
-            if (level == 0)
-                last = true;
-            else
-            {
-                float half = size / 2;
-                for (int i = 0; i < 8; i++)
-                {
-                    Octree oct = new Octree(new float3(start.x + (i % 2) * half, start.y + (i / 2 % 2) * half, start.z + (i / 4 % 2) * half), half, level - 1);
-                    children.Add(oct);
-                }
-                last = false;
-            }
-        }
-
-        public bool Contains(float3 position)
-        {
-            return (position.x > start.x && position.y > start.y && position.z > start.z) && (position.x < end.x && position.y < end.y && position.z < end.z);
-        }
-
-        public bool Search(float3 position, ref UnsafeList<float3> pos, ref UnsafeList<float3> vel)
-        {
-            if (!Contains(position))
-                return false;
-
-            if (last)
-            {
-                //Debug.Log(positions.Length);
-                foreach (float3 val in positions)
-                    pos.Add(val);
-                foreach (float3 val in velocities)
-                    vel.Add(val);
-
-                return true;
-            }
-
-            foreach (Octree child in children)
-                if (child.Search(position, ref pos, ref vel))
-                    return true;
-
-            return false;
-        }
-
-        public bool Insert(float3 pos, float3 vel)
-        {
-            if (!Contains(pos))
-                return false;
-
-            if (last)
-            {
-                test = pos;
-                positions.Add(test);
-                velocities.Add(vel);
-                Debug.Log(positions.Length);
-                /*Debug.Log(size);
-                Debug.Log(start);*/
-                return true;
-            }
-
-            foreach (Octree child in children)
-                if (child.Insert(pos, vel))
-                    return true;
-
-            return false;
-        }
-
-        public bool Remove(float3 position)
-        {
-            if (!Contains(position))
-                return false;
-
-            if (last)
-            {
-                if (positions.Contains(position))
-                {
-                    int idx = positions.IndexOf(position);
-                    velocities.RemoveAt(idx);
-                    positions.RemoveAt(idx);
-
-                    return true;
-                }
-                return false;
-            }
-
-            foreach (Octree child in children)
-                if (child.Remove(position))
-                    return true;
-
-            return false;
-        }
-
-        public void Destroy()
-        {
-            if (last)
-            {
-                positions.Dispose();
-                velocities.Dispose();
-                //children.Dispose();
-                return;
-            }
-
-            foreach (Octree child in children)
-                child.Destroy();
-            //children.Dispose();
-        }
-
-        public void Clear()
-        {
-            if (last)
-            {
-                positions.Clear();
-                velocities.Clear();
-            }
         }
     }
 }

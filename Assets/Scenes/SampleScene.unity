@@ -457,21 +457,21 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   speed: 2
-  turningSpeed: 200
+  turningSpeed: 3
   flockDistance: 5
-  stearingWeight: 1
-  flockingWeight: 0.5
-  centerWeight: 0.3
-  movementRandomness: 0.2
+  stearingWeight: 0.3
+  flockingWeight: 0.1
+  centerWeight: 0.7
+  movementRandomness: 0.6
   fishPrefab: {fileID: 9076771752694747475, guid: 47d884ab2c1f51442a8ce4f8bdc1823b,
     type: 3}
-  initialFishSpawn: 5000
-  spawnRadius: 50
+  initialFishSpawn: 20000
+  spawnRadius: 10
   size: 100
   levels: 1
   fishes: []
   dimentions: {x: 50, y: 50, z: 50}
-  bucketSize: 20
+  bucketSize: 3
 --- !u!4 &930631962
 Transform:
   m_ObjectHideFlags: 0

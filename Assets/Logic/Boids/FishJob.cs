@@ -6,11 +6,6 @@ using Unity.Collections;
 using UnityEngine.Jobs;
 using Unity.Mathematics;
 using Unity.Burst;
-using Unity.Collections.LowLevel.Unsafe;
-using TMPro.EditorUtilities;
-using System.Net.Sockets;
-using Unity.VisualScripting;
-using static UnityEditor.ShaderGraph.Internal.KeywordDependentCollection;
 using Random = Unity.Mathematics.Random;
 
 [BurstCompile]
@@ -20,25 +15,29 @@ public struct FishJob : IJobParallelForTransform
     private float _turningSpeed;
     private float _flockDistance;
 
-    public float _stearingWeight;
-    public float _flockingWeight;
-    public float _centerWeight;
+    private float _stearingWeight;
+    private float _flockingWeight;
+    private float _centerWeight;
 
-    public float3 _randomness;
+    private float3 _randomness;
 
     [NativeDisableParallelForRestriction] private NativeArray<float3> _fishesVelocity;
     [NativeDisableParallelForRestriction] private NativeArray<float3> _fishesPosition;
+    [NativeDisableParallelForRestriction] private NativeArray<float3> _fishesRandoms;
     [ReadOnly] private NativeParallelMultiHashMap<int3, int>.ReadOnly _space;
 
-    public float _deltaTime;
-    public int _bucketSize;
+    private float _deltaTime;
+    private int _bucketSize;
 
 
     private Random rng;
 
+    private bool _isEven;
+
 
     public FishJob(float speed, float turningSpeed, float flockDistance, float stearingWeight, float flockingWeight, float centerWeight, float randomness,
-        NativeArray<float3> fishesVelocity, NativeArray<float3> fishesPosition, NativeParallelMultiHashMap<int3, int>.ReadOnly space, float deltaTime, int bucketSize, uint seed)
+        NativeArray<float3> fishesVelocity, NativeArray<float3> fishesPosition, NativeParallelMultiHashMap<int3, int>.ReadOnly space, NativeArray<float3> fishesRandoms,
+        float deltaTime, int bucketSize, uint seed, bool isEven)
     {
         _speed = speed;
         _turningSpeed = turningSpeed;
@@ -51,20 +50,24 @@ public struct FishJob : IJobParallelForTransform
         _fishesVelocity = fishesVelocity;
         _fishesPosition = fishesPosition;
 
-        _space = space;
-
         _deltaTime = deltaTime;
 
+        _space = space;
         _bucketSize = bucketSize;
 
-        rng = new Random(seed);
+        _fishesRandoms = fishesRandoms;
 
+        rng = new Random(seed);
         _randomness = new float3(randomness, randomness, randomness);
+
+        _isEven = isEven;
     }
 
 
     public void Execute(int index, TransformAccess transform)
     {
+        if (_isEven == (index % 2 == 0))
+            return;
         float3 pos = (float3)transform.position;
 
         int flockCount = 0;
@@ -83,7 +86,6 @@ public struct FishJob : IJobParallelForTransform
                     NativeParallelMultiHashMapIterator<int3> iterator;
                     if (_space.TryGetFirstValue(bucketPos, out tempData, out iterator))
                     {
-                        //Debug.Log(tempData);
                         do
                         {
                             if (tempData == index)
@@ -111,9 +113,11 @@ public struct FishJob : IJobParallelForTransform
             _fishesVelocity[index] += ((flockCenter / flockCount) - pos) * _centerWeight;
         }
 
-        _fishesVelocity[index] += rng.NextFloat3(-_randomness, _randomness);
+        _fishesRandoms[index] = math.normalize(rng.NextFloat3(-_randomness, _randomness) + _fishesRandoms[index]);
 
-        transform.SetPositionAndRotation(Vector3.Lerp(transform.position, Vector3.MoveTowards(transform.position, (float3)transform.position + _fishesVelocity[index], _speed * 2), 5f * _deltaTime),
-            Quaternion.Lerp(transform.rotation, Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(_fishesVelocity[index], math.up()), _turningSpeed), 5f * _deltaTime));
+        /*transform.SetPositionAndRotation(Vector3.Lerp(transform.position, Vector3.MoveTowards(transform.position, (float3)transform.position + _fishesVelocity[index], _speed * 2), 5f * _deltaTime),
+            Quaternion.Lerp(transform.rotation, Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(_fishesVelocity[index], math.up()), _turningSpeed), 5f * _deltaTime));*/
+        transform.SetPositionAndRotation(Vector3.Lerp(transform.position,(float3)transform.position + _fishesVelocity[index], 5f * _deltaTime * _speed),
+            Quaternion.Lerp(transform.rotation, Quaternion.LookRotation(_fishesVelocity[index], math.up()), 5f * _deltaTime * _turningSpeed));
     }
 }
