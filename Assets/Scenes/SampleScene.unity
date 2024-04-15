@@ -462,10 +462,10 @@ MonoBehaviour:
   stearingWeight: 0.3
   flockingWeight: 0.1
   centerWeight: 0.7
-  movementRandomness: 0.6
+  movementRandomness: 0.2
   fishPrefab: {fileID: 9076771752694747475, guid: 47d884ab2c1f51442a8ce4f8bdc1823b,
     type: 3}
-  initialFishSpawn: 20000
+  initialFishSpawn: 5000
   spawnRadius: 10
   size: 100
   levels: 1

@@ -1,16 +1,14 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using Unity.Burst;
 using Unity.Collections;
-using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Jobs;
-using static UnityEditor.PlayerSettings;
 using Random = UnityEngine.Random;
+
 
 public class FishController : MonoBehaviour
 {
@@ -35,15 +33,13 @@ public class FishController : MonoBehaviour
 
     public List<GameObject> fishes;
 
-    public NativeArray<float3> fishPositions;
-    public NativeArray<float3> fishVelocities;
-    public NativeArray<float3> fishRandoms;
+    private NativeArray<FishData> fishData;
     public TransformAccessArray fishTransforms;
 
 
-    public NativeParallelMultiHashMap<int3, int> hash;
+    private SpatialHash spatialHash;
 
-    public Vector3Int dimentions = new Vector3Int(10, 10, 10);
+    public Vector3Int dimentions = new(10, 10, 10);
     public int bucketSize = 5;
 
     private JobHandle handle;
@@ -53,20 +49,17 @@ public class FishController : MonoBehaviour
 
     void Start()
     {
-        fishPositions = new(initialFishSpawn, Allocator.Persistent);
-        fishVelocities = new(initialFishSpawn, Allocator.Persistent);
-        fishRandoms = new(initialFishSpawn, Allocator.Persistent);
+        fishData = new(initialFishSpawn, Allocator.Persistent);
         fishTransforms = new TransformAccessArray(initialFishSpawn);
 
-        hash = new NativeParallelMultiHashMap<int3, int>(initialFishSpawn, Allocator.Persistent);
+        spatialHash = new(bucketSize, dimentions, initialFishSpawn);
         for (int i = 0; i < initialFishSpawn; i++)
         {
             Vector3 pos = Random.insideUnitSphere * spawnRadius;
             GameObject obj = Instantiate(fishPrefab, pos, Random.rotation);
-            fishPositions[i] = (float3)pos;
-            fishVelocities[i] = (float3)obj.transform.forward;
-            fishTransforms.Add(obj.transform);
+            //fishData[i] = new FishData(obj.transform.forward, pos, float3.zero);
 
+            fishTransforms.Add(obj.transform);
             fishes.Add(obj);
         }
     }
@@ -74,18 +67,19 @@ public class FishController : MonoBehaviour
 
     void Update()
     {
-        hash.Clear();
-        SetSpatialHash spacesUpdater = new SetSpatialHash(fishPositions, fishVelocities, hash.AsParallelWriter(), bucketSize);
-        
+        spatialHash.Clear();
+        SetSpatialHash spacesUpdater = new SetSpatialHash(fishData, spatialHash.AsParallelWriter());
+
         JobHandle spaces = spacesUpdater.Schedule(fishTransforms);
 
-        FishJob job = new FishJob(speed, turningSpeed, flockDistance, stearingWeight, flockingWeight, centerWeight, movementRandomness, 
-            fishVelocities, fishPositions, hash.AsReadOnly(), fishRandoms, Time.deltaTime, bucketSize, (uint)Random.Range(0, 50000) , isEven);
+        FishJob job = new(speed, turningSpeed, flockDistance, stearingWeight, flockingWeight, centerWeight, movementRandomness, 
+            fishData, spatialHash, Time.deltaTime, (uint)Random.Range(0, 50000) , isEven);
 
         handle = job.Schedule(fishTransforms, spaces);
 
         isEven = !isEven;
     }
+
     private void LateUpdate()
     {
         handle.Complete();
@@ -94,73 +88,43 @@ public class FishController : MonoBehaviour
     private void OnDestroy()
     {
         handle.Complete();
-        hash.Dispose();
-        fishPositions.Dispose();
-        fishVelocities.Dispose();
-        fishRandoms.Dispose();
+        spatialHash.Dispose();
+        fishData.Dispose();
         fishTransforms.Dispose();
     }
 
-    /*private void OnDrawGizmosSelected()
+    public struct FishData
     {
-        if (!hash.IsCreated)
-            return;
-        NativeArray<int3> arr = hash.GetKeyArray(Allocator.Temp);
+        public float3 velocity;
+        public float3 position;
+        public float3 random;
 
-        foreach (var i in arr)
+        public FishData(float3 _velocity, float3 _position, float3 _random)
         {
-            Gizmos.color = new Color(hash.CountValuesForKey(i) / 50.0f, 0, 0);
-            Gizmos.DrawWireCube((float3)i * bucketSize + (bucketSize / 2), (float3)bucketSize);
-
-            int tempData;
-            NativeParallelMultiHashMapIterator<int3> iterator;
-            if (hash.TryGetFirstValue(i, out tempData, out iterator))
-            {
-                //Debug.Log(tempData);
-                do
-                {
-                    Debug.DrawLine((float3)i * bucketSize, fishPositions[tempData], new Color(1, 0, 0));
-                } while (hash.TryGetNextValue(out tempData, ref iterator));
-            }
+            velocity = _velocity;
+            position = _position;
+            random = _random;
         }
-
-        arr.Dispose();
-    }*/
-
-    public static int3 GetKey(float3 pos, int bucketSize)
-    {
-        int3 output = new int3();
-
-        output.x = (int)math.floor(pos.x / bucketSize);
-        output.y = (int)math.floor(pos.y / bucketSize);
-        output.z = (int)math.floor(pos.z / bucketSize);
-        return output;
     }
 
     [BurstCompile]
     public struct SetSpatialHash : IJobParallelForTransform
     {
-        private int _bucketSize;
-        [NativeDisableParallelForRestriction] private NativeArray<float3> _fishesPosition;
-        [NativeDisableParallelForRestriction] private NativeArray<float3> _fishesVelocity;
-        [NativeDisableParallelForRestriction] private NativeParallelMultiHashMap<int3, int>.ParallelWriter _fishesSpace;
+        [NativeDisableParallelForRestriction] private NativeArray<FishData> _fishData;
+        [NativeDisableParallelForRestriction] private SpatialHash.ParallelWriter _fishesSpace;
 
 
-        public SetSpatialHash(NativeArray<float3> fishesPosition, NativeArray<float3> fishesVelocity, NativeParallelMultiHashMap<int3, int>.ParallelWriter fishesSpace, int bucketSize)
+        public SetSpatialHash(NativeArray<FishData> fishData, SpatialHash.ParallelWriter fishesSpace)
         {
-            _fishesPosition = fishesPosition;
-            _fishesVelocity = fishesVelocity;
-            _fishesSpace = fishesSpace;
 
-            _bucketSize = bucketSize;
+            _fishData = fishData;
+            _fishesSpace = fishesSpace;
         }
 
         public void Execute(int idx, TransformAccess transform)
         {
-            _fishesPosition[idx] = transform.position;
-            _fishesVelocity[idx] = math.forward(transform.rotation);
-            int3 key = GetKey(transform.position, _bucketSize);
-            _fishesSpace.Add(key, idx);
+            _fishData[idx] = new FishData(math.forward(transform.rotation), transform.position, _fishData[idx].random);
+            _fishesSpace.Insert(transform.position, idx);
         }
     }
 }

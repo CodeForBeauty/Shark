@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using Unity.Jobs;
 using Unity.Collections;
 using UnityEngine.Jobs;
 using Unity.Mathematics;
@@ -21,13 +20,10 @@ public struct FishJob : IJobParallelForTransform
 
     private float3 _randomness;
 
-    [NativeDisableParallelForRestriction] private NativeArray<float3> _fishesVelocity;
-    [NativeDisableParallelForRestriction] private NativeArray<float3> _fishesPosition;
-    [NativeDisableParallelForRestriction] private NativeArray<float3> _fishesRandoms;
-    [ReadOnly] private NativeParallelMultiHashMap<int3, int>.ReadOnly _space;
+    [NativeDisableParallelForRestriction] private NativeArray<FishController.FishData> _fishData;
+    [ReadOnly] private SpatialHash _space;
 
     private float _deltaTime;
-    private int _bucketSize;
 
 
     private Random rng;
@@ -36,8 +32,8 @@ public struct FishJob : IJobParallelForTransform
 
 
     public FishJob(float speed, float turningSpeed, float flockDistance, float stearingWeight, float flockingWeight, float centerWeight, float randomness,
-        NativeArray<float3> fishesVelocity, NativeArray<float3> fishesPosition, NativeParallelMultiHashMap<int3, int>.ReadOnly space, NativeArray<float3> fishesRandoms,
-        float deltaTime, int bucketSize, uint seed, bool isEven)
+        NativeArray<FishController.FishData> fishData, SpatialHash space,
+        float deltaTime, uint seed, bool isEven)
     {
         _speed = speed;
         _turningSpeed = turningSpeed;
@@ -47,15 +43,11 @@ public struct FishJob : IJobParallelForTransform
         _flockingWeight = flockingWeight;
         _centerWeight = centerWeight;
 
-        _fishesVelocity = fishesVelocity;
-        _fishesPosition = fishesPosition;
+        _fishData = fishData;
 
         _deltaTime = deltaTime;
 
         _space = space;
-        _bucketSize = bucketSize;
-
-        _fishesRandoms = fishesRandoms;
 
         rng = new Random(seed);
         _randomness = new float3(randomness, randomness, randomness);
@@ -74,33 +66,35 @@ public struct FishJob : IJobParallelForTransform
 
         float3 averageVelocity = new(), flockCenter = new();
 
-        for (float i = -_flockDistance; i < _flockDistance; i += _bucketSize)
+        FishController.FishData data = _fishData[index];
+
+        for (float i = -_flockDistance; i < _flockDistance; i += _space.BucketSize)
         {
-            for (float j = -_flockDistance; j < _flockDistance; j += _bucketSize)
+            for (float j = -_flockDistance; j < _flockDistance; j += _space.BucketSize)
             {
-                for (float k = -_flockDistance; k < _flockDistance; k += _bucketSize)
+                for (float k = -_flockDistance; k < _flockDistance; k += _space.BucketSize)
                 {
-                    int3 bucketPos = FishController.GetKey(new float3(pos.x + i, pos.y + j, pos.z + k), _bucketSize);
+                    float3 bucketPos = new(pos.x + i, pos.y + j, pos.z + k);
 
                     int tempData;
                     NativeParallelMultiHashMapIterator<int3> iterator;
-                    if (_space.TryGetFirstValue(bucketPos, out tempData, out iterator))
+                    if (_space.GetFirst(bucketPos, out tempData, out iterator))
                     {
                         do
                         {
                             if (tempData == index)
                                 continue;
-                            float distance = math.distance(pos, _fishesPosition[tempData]);
+                            float distance = math.distance(pos, _fishData[tempData].position);
                             if (distance < _flockDistance)
                             {
 
-                                _fishesVelocity[index] += math.normalize(pos - _fishesPosition[tempData]) * (_flockDistance - distance) * _stearingWeight;
-                                averageVelocity += _fishesVelocity[tempData];
+                                data.velocity += math.normalize(pos - _fishData[tempData].position) * (_flockDistance - distance) * _stearingWeight;
+                                averageVelocity += _fishData[tempData].velocity;
                                 flockCount++;
 
-                                flockCenter += _fishesPosition[tempData];
+                                flockCenter += _fishData[tempData].position;
                             }
-                        } while (_space.TryGetNextValue(out tempData, ref iterator));
+                        } while (_space.GetNext(out tempData, ref iterator));
                     }
                 }
             }
@@ -109,15 +103,19 @@ public struct FishJob : IJobParallelForTransform
 
         if (flockCount > 0)
         {
-            _fishesVelocity[index] += (averageVelocity / flockCount) * _flockingWeight;
-            _fishesVelocity[index] += ((flockCenter / flockCount) - pos) * _centerWeight;
+            data.velocity += (averageVelocity / flockCount) * _flockingWeight;
+            data.velocity += ((flockCenter / flockCount) - pos) * _centerWeight;
         }
 
-        _fishesRandoms[index] = math.normalize(rng.NextFloat3(-_randomness, _randomness) + _fishesRandoms[index]);
+        if (!Equals(_randomness, 0))
+        {
+            data.random = math.normalize(rng.NextFloat3(-_randomness, _randomness) + data.random);
+            data.velocity += data.random * _randomness;
+        }
 
-        /*transform.SetPositionAndRotation(Vector3.Lerp(transform.position, Vector3.MoveTowards(transform.position, (float3)transform.position + _fishesVelocity[index], _speed * 2), 5f * _deltaTime),
-            Quaternion.Lerp(transform.rotation, Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(_fishesVelocity[index], math.up()), _turningSpeed), 5f * _deltaTime));*/
-        transform.SetPositionAndRotation(Vector3.Lerp(transform.position,(float3)transform.position + _fishesVelocity[index], 5f * _deltaTime * _speed),
-            Quaternion.Lerp(transform.rotation, Quaternion.LookRotation(_fishesVelocity[index], math.up()), 5f * _deltaTime * _turningSpeed));
+        transform.SetPositionAndRotation(Vector3.Lerp(transform.position,(float3)transform.position + data.velocity, 5f * _deltaTime * _speed),
+            Quaternion.Lerp(transform.rotation, Quaternion.LookRotation(data.velocity, math.up()), 5f * _deltaTime * _turningSpeed));
+
+        _fishData[index] = data;
     }
 }
