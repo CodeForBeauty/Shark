@@ -22,7 +22,7 @@ public struct SpatialHash
 
     public bool GetFirst(float3 pos, out int firstElem, out NativeParallelMultiHashMapIterator<int3> iterator)
     {
-        return Hash.TryGetFirstValue(getKey(pos), out firstElem, out iterator);
+        return Hash.TryGetFirstValue(getKey(pos, BucketSize), out firstElem, out iterator);
     }
 
     public bool GetNext(out int elem, ref NativeParallelMultiHashMapIterator<int3> iterator)
@@ -32,22 +32,22 @@ public struct SpatialHash
 
     public void Insert(float3 pos, int index)
     {
-        int3 key = getKey(pos);
+        int3 key = getKey(pos, BucketSize);
 
         Hash.AsParallelWriter().Add(key, index);
     }
 
     public void Remove(float3 pos, int index)
     {
-        int3 key = getKey(pos);
+        int3 key = getKey(pos, BucketSize);
 
         Hash.Remove(key, index);
     }
 
     public void Update(float3 oldPos, float3 newPos, int index)
     {
-        int3 key = getKey(oldPos);
-        int3 key1 = getKey(newPos);
+        int3 key = getKey(oldPos, BucketSize);
+        int3 key1 = getKey(newPos, BucketSize);
 
         bool3 isSame = key == key1;
         if (isSame.x && isSame.y && isSame.z)
@@ -63,13 +63,13 @@ public struct SpatialHash
     }
 
 
-    private int3 getKey(float3 pos)
+    static public int3 getKey(float3 pos, float bucketSize)
     {
         int3 output = new()
         {
-            x = (int)math.floor(pos.x / BucketSize),
-            y = (int)math.floor(pos.y / BucketSize),
-            z = (int)math.floor(pos.z / BucketSize)
+            x = (int)math.floor(pos.x / bucketSize),
+            y = (int)math.floor(pos.y / bucketSize),
+            z = (int)math.floor(pos.z / bucketSize)
         };
         return output;
     }

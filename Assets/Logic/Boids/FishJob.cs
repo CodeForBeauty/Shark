@@ -20,8 +20,8 @@ public struct FishJob : IJobParallelForTransform
 
     private float3 _randomness;
 
+    [ReadOnly] private NativeParallelMultiHashMap<int3, int>.ReadOnly _space;
     [NativeDisableParallelForRestriction] private NativeArray<FishController.FishData> _fishData;
-    [ReadOnly] private SpatialHash _space;
 
     private float _deltaTime;
 
@@ -30,10 +30,12 @@ public struct FishJob : IJobParallelForTransform
 
     private bool _isEven;
 
+    private float _bucketSize;
+
 
     public FishJob(float speed, float turningSpeed, float flockDistance, float stearingWeight, float flockingWeight, float centerWeight, float randomness,
-        NativeArray<FishController.FishData> fishData, SpatialHash space,
-        float deltaTime, uint seed, bool isEven)
+        NativeArray<FishController.FishData> fishData, NativeParallelMultiHashMap<int3, int>.ReadOnly space,
+        float deltaTime, uint seed, bool isEven, float bucketSize)
     {
         _speed = speed;
         _turningSpeed = turningSpeed;
@@ -53,6 +55,8 @@ public struct FishJob : IJobParallelForTransform
         _randomness = new float3(randomness, randomness, randomness);
 
         _isEven = isEven;
+
+        _bucketSize = bucketSize;
     }
 
 
@@ -68,17 +72,17 @@ public struct FishJob : IJobParallelForTransform
 
         FishController.FishData data = _fishData[index];
 
-        for (float i = -_flockDistance; i < _flockDistance; i += _space.BucketSize)
+        for (float i = -_flockDistance; i < _flockDistance; i += _bucketSize)
         {
-            for (float j = -_flockDistance; j < _flockDistance; j += _space.BucketSize)
+            for (float j = -_flockDistance; j < _flockDistance; j += _bucketSize)
             {
-                for (float k = -_flockDistance; k < _flockDistance; k += _space.BucketSize)
+                for (float k = -_flockDistance; k < _flockDistance; k += _bucketSize)
                 {
                     float3 bucketPos = new(pos.x + i, pos.y + j, pos.z + k);
 
                     int tempData;
                     NativeParallelMultiHashMapIterator<int3> iterator;
-                    if (_space.GetFirst(bucketPos, out tempData, out iterator))
+                    if (_space.TryGetFirstValue(SpatialHash.getKey(bucketPos, _bucketSize), out tempData, out iterator))
                     {
                         do
                         {
@@ -94,7 +98,7 @@ public struct FishJob : IJobParallelForTransform
 
                                 flockCenter += _fishData[tempData].position;
                             }
-                        } while (_space.GetNext(out tempData, ref iterator));
+                        } while (_space.TryGetNextValue(out tempData, ref iterator));
                     }
                 }
             }
@@ -106,8 +110,8 @@ public struct FishJob : IJobParallelForTransform
             data.velocity += (averageVelocity / flockCount) * _flockingWeight;
             data.velocity += ((flockCenter / flockCount) - pos) * _centerWeight;
         }
-
-        if (!Equals(_randomness, 0))
+        
+        if (math.all(_randomness != 0))
         {
             data.random = math.normalize(rng.NextFloat3(-_randomness, _randomness) + data.random);
             data.velocity += data.random * _randomness;
@@ -117,5 +121,16 @@ public struct FishJob : IJobParallelForTransform
             Quaternion.Lerp(transform.rotation, Quaternion.LookRotation(data.velocity, math.up()), 5f * _deltaTime * _turningSpeed));
 
         _fishData[index] = data;
+    }
+
+    private int3 getKey(float3 pos)
+    {
+        int3 output = new()
+        {
+            x = (int)math.floor(pos.x / _bucketSize),
+            y = (int)math.floor(pos.y / _bucketSize),
+            z = (int)math.floor(pos.z / _bucketSize)
+        };
+        return output;
     }
 }
