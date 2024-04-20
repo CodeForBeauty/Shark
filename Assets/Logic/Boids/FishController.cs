@@ -68,12 +68,12 @@ public class FishController : MonoBehaviour
     void Update()
     {
         spatialHash.Clear();
-        SetSpatialHash spacesUpdater = new SetSpatialHash(fishData, spatialHash.Hash.AsParallelWriter(), bucketSize);
+        SetSpatialHash spacesUpdater = new SetSpatialHash(fishData, spatialHash.AsParallelWriter(), bucketSize);
 
         JobHandle spaces = spacesUpdater.Schedule(fishTransforms);
 
         FishJob job = new(speed, turningSpeed, flockDistance, stearingWeight, flockingWeight, centerWeight, movementRandomness, 
-            fishData, spatialHash.Hash.AsReadOnly(), Time.deltaTime, (uint)Random.Range(0, 50000) , isEven, bucketSize);
+            fishData, spatialHash, Time.deltaTime, (uint)Random.Range(0, 50000) , isEven);
 
         handle = job.Schedule(fishTransforms, spaces);
 
@@ -111,11 +111,11 @@ public class FishController : MonoBehaviour
     public struct SetSpatialHash : IJobParallelForTransform
     {
         [NativeDisableParallelForRestriction] private NativeArray<FishData> _fishData;
-        [NativeDisableParallelForRestriction] private NativeParallelMultiHashMap<int3, int>.ParallelWriter _fishesSpace;
+        [NativeDisableParallelForRestriction] private SpatialHash.ParallelWriter _fishesSpace;
         private float _bucketSize;
 
 
-        public SetSpatialHash(NativeArray<FishData> fishData, NativeParallelMultiHashMap<int3, int>.ParallelWriter fishesSpace, float bucketSize)
+        public SetSpatialHash(NativeArray<FishData> fishData, SpatialHash.ParallelWriter fishesSpace, float bucketSize)
         {
 
             _fishData = fishData;
@@ -126,7 +126,7 @@ public class FishController : MonoBehaviour
         public void Execute(int idx, TransformAccess transform)
         {
             _fishData[idx] = new FishData(math.forward(transform.rotation), transform.position, _fishData[idx].random);
-            _fishesSpace.Add(SpatialHash.getKey(transform.position, _bucketSize), idx);
+            _fishesSpace.Insert(transform.position, idx);
         }
     }
 }
